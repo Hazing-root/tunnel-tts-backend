@@ -87,8 +87,12 @@
     <script>
         class TunnelTTS {
             constructor() {
-                this.socket = null; this.isConnected = false; this.rateLimitTimeout = null;
-                this.initializeElements(); this.setupEventListeners(); this.connect();
+                this.socket = null;
+                this.isConnected = false;
+                this.rateLimitTimeout = null;
+                this.initializeElements();
+                this.setupEventListeners();
+                this.connect();
             }
             initializeElements() {
                 this.textInput = document.getElementById('textInput');
@@ -109,7 +113,7 @@
                 const key = urlParams.get('key') || 'changeme';
                 const BACKEND = location.hostname === 'localhost'
                     ? 'http://localhost:3000'
-                    : 'https://tunnel-tts-backend-XXXX.onrender.com'; // ← your Render URL
+                    : 'https://tunnel-tts-backend.onrender.com'; // ← your Render URL
                 this.socket = io(BACKEND, { query: { key: key, type: 'browser' }, transports: ['websocket', 'polling'] });
                 this.setupSocketEvents();
             }
