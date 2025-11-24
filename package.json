@@ -1,0 +1,27 @@
+
+{
+  "name": "tunnel-tts-app",
+  "version": "1.0.0",
+  "description": "Real-time text-to-speech through Cloudflare Tunnel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "client": "node client.js",
+    "dev": "concurrently \"npm start\" \"npm run client\""
+  },
+  "keywords": ["tts", "websocket", "cloudflare", "tunnel", "express"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.7.2",
+    "helmet": "^7.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "rate-limiter-flexible": "^4.0.1"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
