@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tunnel TTS - Real-time Speech</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white; border-radius: 20px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 40px; max-width: 500px; width: 100%; text-align: center;
+        }
+        h1 { color: #333; margin-bottom: 10px; font-size: 28px; font-weight: 600; }
+        .subtitle { color: #666; margin-bottom: 30px; font-size: 14px; }
+        .input-section { margin-bottom: 30px; }
+        textarea {
+            width: 100%; min-height: 120px; padding: 15px; border: 2px solid #e1e5e9;
+            border-radius: 12px; font-size: 16px; font-family: inherit; resize: vertical;
+            transition: border-color 0.3s ease; outline: none;
+        }
+        textarea:focus { border-color: #667eea; }
+        textarea::placeholder { color: #999; }
+        .char-count { text-align: right; font-size: 12px; color: #666; margin-top: 5px; }
+        .char-count.warning { color: #ff6b6b; }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;
+            border: none; padding: 15px 40px; border-radius: 12px; font-size: 16px;
+            font-weight: 600; cursor: pointer; transition: all 0.3s ease; width: 100%;
+            margin-bottom: 20px;
+        }
+        button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3); }
+        button:active:not(:disabled) { transform: translateY(0); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .status { padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; font-weight: 500; }
+        .status.connected { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .status.disconnected { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .status.speaking { background: #cce5ff; color: #004085; border: 1px solid #b8daff; }
+        .status.error { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+        .instructions { background: #f8f9fa; padding: 20px; border-radius: 12px; margin-top: 30px; text-align: left; font-size: 14px; line-height: 1.6; color: #555; }
+        .instructions h3 { margin-bottom: 10px; color: #333; font-size: 16px; }
+        .instructions ul { padding-left: 20px; }
+        .instructions li { margin-bottom: 5px; }
+        .loading { display: inline-block; width: 12px; height: 12px; border: 2px solid #f3f3f3; border-top: 2px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .hidden { display: none; }
+        @media (max-width: 480px) { .container { padding: 30px 20px; } h1 { font-size: 24px; } textarea { font-size: 16px; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗣️ Tunnel TTS</h1>
+        <p class="subtitle">Real-time Text-to-Speech through Cloudflare Tunnel</p>
+
+        <div id="status" class="status disconnected">
+            <span class="loading hidden"></span>
+            <span id="statusText">Connecting...</span>
+        </div>
+
+        <div class="input-section">
+            <textarea id="textInput" placeholder="Enter text to speak (max 100 characters)..." maxlength="100" rows="4"></textarea>
+            <div class="char-count" id="charCount">0/100</div>
+        </div>
+
+        <button id="speakButton" disabled>
+            <span class="loading hidden"></span>
+            <span id="buttonText">Enter</span>
+        </button>
+
+        <div class="instructions">
+            <h3>How to use:</h3>
+            <ul>
+                <li>Type up to 100 characters in the text area</li>
+                <li>Press Enter key or click the button to speak</li>
+                <li>Wait 5 seconds between requests (rate limit)</li>
+                <li>Make sure your PC client is running</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        class TunnelTTS {
+            constructor() {
+                this.socket = null; this.isConnected = false; this.rateLimitTimeout = null;
+                this.initializeElements(); this.setupEventListeners(); this.connect();
+            }
+            initializeElements() {
+                this.textInput = document.getElementById('textInput');
+                this.speakButton = document.getElementById('speakButton');
+                this.statusDiv = document.getElementById('status');
+                this.statusText = document.getElementById('statusText');
+                this.charCount = document.getElementById('charCount');
+                this.buttonText = document.getElementById('buttonText');
+            }
+            setupEventListeners() {
+                this.textInput.addEventListener('input', () => { this.updateCharCount(); this.updateButtonState(); });
+                this.textInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.speak(); } });
+                this.speakButton.addEventListener('click', () => this.speak());
+            }
+            connect() {
+                this.updateStatus('Connecting...', 'disconnected');
+                const urlParams = new URLSearchParams(window.location.search);
+                const key = urlParams.get('key') || 'changeme';
+                const BACKEND = location.hostname === 'localhost'
+                    ? 'http://localhost:3000'
+                    : 'https://tunnel-tts-backend-XXXX.onrender.com'; // ← your Render URL
+                this.socket = io(BACKEND, { query: { key: key, type: 'browser' }, transports: ['websocket', 'polling'] });
+                this.setupSocketEvents();
+            }
+            setupSocketEvents() {
+                this.socket.on('connect', () => { this.isConnected = true; this.updateStatus('Connected', 'connected'); this.updateButtonState(); });
+                this.socket.on('disconnect', () => { this.isConnected = false; this.updateStatus('Disconnected', 'disconnected'); this.updateButtonState(); });
+                this.socket.on('connect_error', (err) => { this.isConnected = false; this.updateStatus('Connection failed', 'error'); console.error(err); });
+                this.socket.on('success', (d) => { this.updateStatus(d.message || 'Text sent', 'speaking'); this.clearInput(); this.setRateLimit(); });
+                this.socket.on('error', (d) => { this.updateStatus(d.message || 'Error', 'error'); if (d.message?.includes('Rate limit')) this.setRateLimit(); });
+            }
+            updateStatus(msg, type) { this.statusText.textContent = msg; this.statusDiv.className = `status ${type}`; }
+            updateCharCount() { const len = this.textInput.value.length; this.charCount.textContent = `${len}/100`; this.charCount.className = len > 90 ? 'char-count warning' : 'char-count'; }
+            updateButtonState() { const ok = this.isConnected && this.textInput.value.trim().length && !this.rateLimitTimeout; this.speakButton.disabled = !ok; }
+            speak() {
+                const text = this.textInput.value.trim();
+                if (!text) return this.updateStatus('Please enter text', 'error');
+                if (!this.isConnected) return this.updateStatus('Not connected', 'error');
+                if (this.rateLimitTimeout) return this.updateStatus('Cooldown active', 'error');
+                this.socket.emit('speak', { text });
+                this.updateStatus('Sending...', 'speaking');
+            }
+            setRateLimit() {
+                this.rateLimitTimeout = setTimeout(() => { this.rateLimitTimeout = null; this.updateStatus('Connected', 'connected'); this.updateButtonState(); }, 5000);
+                this.updateButtonState();
+            }
+            clearInput() { this.textInput.value = ''; this.updateCharCount(); this.updateButtonState(); }
+        }
+        document.addEventListener('DOMContentLoaded', () => new TunnelTTS());
+    </script>
+</body>
+</html>
